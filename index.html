@@ -1,0 +1,204 @@
+<!-- https://github.com/webrtc/samples/blob/gh-pages/src/content/peerconnection/audio/js/main.js 
+
+1. Звонящий захватывает локальные медиа через navigator.mediaDevices.getUserMedia() 
+2. Вызывающий объект создает RTCPeerConnection 
+3. и  вызывает  RTCPeerConnection.addTrack()(Так как addStreamявляется устаревшим)
+4. Звонящий звонит, RTCPeerConnection.createOffer()чтобы создать предложение.
+5. Вызывающий абонент вызывает RTCPeerConnection.setLocalDescription()это предложение как локальное описание (то есть описание локального конца соединения).
+6. После setLocalDescription () вызывающая сторона просит серверы STUN сгенерировать iCE кандидатов
+
+(Помимо обмена информацией о мультимедиа (предложениях / ответах и ​​SDP), одноранговые узлы должны обмениваться информацией о сетевом подключении через ICE кандидаты)
+
+7. Вызывающий абонент использует сервер сигнализации для передачи предложения предполагаемому получателю вызова.
+8. Получатель получает предложение и звонит, RTCPeerConnection.setRemoteDescription()чтобы записать его как удаленное описание (описание другого конца соединения).
+9. Получатель выполняет любую настройку, необходимую ему для завершения вызова: захватывает локальные носители и присоединяет каждую дорожку мультимедиа к одноранговому соединению через RTCPeerConnection.addTrack()
+10. Получатель затем создает ответ по телефону RTCPeerConnection.createAnswer().
+11. Получатель звонит, RTCPeerConnection.setLocalDescription(createdAnswer)чтобы установить ответ в качестве локального описания. Получатель теперь знает конфигурацию обоих концов соединения.
+12. Получатель использует сервер сигнализации для отправки ответа вызывающей стороне.
+13. Звонящий получает ответ.
+14. Вызывающий абонент RTCPeerConnection.setRemoteDescription()устанавливает ответ в качестве удаленного описания для окончания вызова. Теперь он знает конфигурацию обоих пиров. Медиа начинает течь как настроено.
+
+
+
+
+-->
+<html>
+<head>
+	<meta charset="utf-8">
+	<title>Audio</title>
+</head>
+<body>
+	<h3>audio</h3>
+	<div>local audio:</div>
+	<audio id="audio1" autoplay controls muted></audio>
+	<div>remote audio:</div>
+	<audio id="audio2" autoplay controls></audio>
+	<button id="callbutton">call</button>
+	<button id="hangupbutton">hang up</button>
+        
+        
+        
+<script src="/socket.io/socket.io.js"></script>
+<script src="https://code.jquery.com/jquery-1.11.1.js"></script>
+
+
+
+
+	<script>
+            var socket = io();
+          /*  $(function () {
+                
+                $('form').submit(function(e){
+                  e.preventDefault(); // prevents page reloading
+                  socket.emit('chat message', $('#m').val());
+
+                  //var user = '#gender', '#m'];
+
+                  var user_gender = $('#gender').val();
+                  var user_age = $('#age').val();
+
+                  var user = [user_gender, user_age];
+
+                  socket.emit('chat member gender', user);
+
+                  $('#m').val('');
+                  return false;
+                });
+                socket.on('chat message', function(msg){
+                  $('#messages').append($('<li>').text(msg));
+                });
+              });*/
+  
+  
+		const audio2=document.querySelector("#audio2");
+		const callbutton=document.querySelector("#callbutton");
+		const hangupbutton=document.querySelector("#hangupbutton");
+		hangupbutton.disabled=true;
+		callbutton.onclick=call;
+		hangupbutton.onclick=hang;
+		let pc1,pc2,localStream;
+		const offeroptions={offerToReceiveAudio:1,offerToReceiveVideo:0,voiceActivityDetection:false};
+
+		function call(){
+			callbutton.disabled=true;
+			console.log('starting call');
+			//const servers=null;
+                        
+                        
+                        
+                        var servers = {
+                                    iceServerUrl: [
+                                            {url: "stun:stun.ekiga.net"}
+                                    ]
+                            };
+                            
+
+                        
+			pc1=new RTCPeerConnection(servers);	// 2. Звонящий создает объект RTCPeerConnection
+			pc1.onicecandidate=e=>onicecandidate(pc1,e) // 6. После setLocalDescription () вызывающая сторона просит серверы STUN сгенерировать ice кандидатов.
+			// 7 КОТОРОГО НЕТ - Вызывающий абонент использует сервер сигнализации для передачи предложения предполагаемому получателю вызова.
+			pc2=new RTCPeerConnection(servers);
+			pc2.onicacandidate=e=>onicecandidate(pc2,e)
+			pc2.ontrack=gotremotestream;
+			navigator.mediaDevices.getUserMedia({audio:true,video:false}).then(gotStream).catch(e=>{console.log(e.name, e)})	// 1. Звонящий захватывает локальные медиа через navigator.mediaDevices.getUserMedia() 
+		}
+		
+		function gotStream(stream){
+			hangupbutton.disabled=false;
+			console.log("received local stream");
+			localStream=stream;
+			const audioTracks=localStream.getAudioTracks();
+		
+			if(audioTracks.length>0){
+				console.warn(audioTracks[0].label);	
+			}
+
+			localStream.getTracks().forEach(track=>pc1.addTrack(track,localStream)); // 3. и  вызывает  RTCPeerConnection.addTrack() (Так как addStream является устаревшим)
+			console.log("adding local stream to pc");
+			pc1.createOffer(offeroptions).then(gotdesc1,oncreatesessiondescriptionerror); // 4. Звонящий звонит, RTCPeerConnection.createOffer()чтобы создать предложение.
+                        
+		}
+		
+		function oncreatesessiondescriptionerror(e){console.error(e.toString())}
+		
+		function gotdesc1(desc){
+			console.log("offer from pc1\n",desc.sdp)
+                        sendToServer(desc.sdp);
+			pc1.setLocalDescription(desc).then(()=>{ // 5. Вызывающий абонент вызывает RTCPeerConnection.setLocalDescription()это предложение как локальное описание (то есть описание локального конца соединения).
+			pc2.setRemoteDescription(desc).then(()=>{ // 8. Получатель получает предложение и звонит, RTCPeerConnection.setRemoteDescription()чтобы записать его как удаленное описание (описание другого конца соединения).
+
+				// 9. НЕТУ !!!! Получатель выполняет любую настройку, необходимую ему для завершения вызова: захватывает локальные носители и присоединяет каждую дорожку мультимедиа к одноранговому соединению через RTCPeerConnection.addTrack()
+
+			return pc2.createAnswer().then(gotdesc2,oncreatesessiondescriptionerror)	// 10. Получатель затем создает ответ по телефону RTCPeerConnection.createAnswer().
+			},oncreatesessiondescriptionerror)
+			},oncreatesessiondescriptionerror)	
+		} 
+                
+                function sendToServer(msg) {
+                    var msgJSON = JSON.stringify(msg);
+                    
+                    socket.emit('chat message', msgJSON);
+                    
+                    //console.log("----- sendToServer START----- " + msgJSON);
+                   // console.log("----- sendToServer END----- " + msgJSON);
+                   // connection.send(msgJSON);
+                  }
+
+
+		function gotremotestream(e){
+			if(audio2.srcObject !==e.streams[0]){
+			audio2.srcObject=e.streams[0];
+			console.log("receive remote stream");	
+			}	
+		}
+
+		function gotdesc2(desc){
+                    console.log("answer from pc2\n",desc.sdp)
+                    pc2.setLocalDescription(desc).then(()=>{ // 11. Получатель звонит, RTCPeerConnection.setLocalDescription(createdAnswer) чтобы установить ответ в качестве локального описания. Получатель теперь знает конфигурацию обоих концов соединения.
+
+                            // 12. НЕТУ - Получатель использует сервер сигнализации для отправки ответа вызывающей стороне.
+
+                            // 13. НЕТУ - Звонящий получает ответ.
+
+                        pc1.setRemoteDescription(desc).then(()=>{ // 14. Вызывающий абонент RTCPeerConnection.setRemoteDescription()устанавливает ответ в качестве удаленного описания для окончания вызова. Теперь он знает конфигурацию обоих пиров. Медиа начинает течь как настроено.
+
+                            },oncreatesessiondescriptionerror)	
+                        },oncreatesessiondescriptionerror)	
+		}
+		
+		function onicecandidate(pc,event){
+			if(event.candidate)geti(pc).addIceCandidate(event.candidate).then(()=>onicecandidatesuccess(pc),err=>onicecandidateerror(err))
+			if(event.candidate){console.warn(event.candidate.candidate);}else{console.warn(null)}	
+		}
+
+		function geti(pc){
+			return (pc===pc1) ? pc2:pc1;	
+		}
+
+		function onicecandidatesuccess(){console.log("ice candidate success")}
+		
+		function onicecandidateerror(e){console.error(e.toString())}
+
+		function hang(){
+			console.log("ending call");
+			localStream.getTracks().forEach(track=>track.stop())
+			pc1.close();
+			pc2.close();
+			pc1=null;pc2=null;
+			hangupbutton.disabled=true;
+			callbutton.disabled=false;	
+		}
+
+		//function getname(){
+		//	return (pc===pc1) ? 'pc1':'pc2';	
+		//}
+
+	</script>
+        
+        
+        
+        <script src="/socket.io/socket.io.js"></script>
+<script src="https://code.jquery.com/jquery-1.11.1.js"></script>
+
+</body>
+</html>
