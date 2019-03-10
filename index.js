@@ -1,9 +1,136 @@
+var express=require('express');
+var app = express();
+
+const fs = require('fs');
+const https = require('https');
+const WebSocket = require('ws');
+ 
+const server = new https.createServer({
+  cert: fs.readFileSync('/home/a0281868/domains/tetatetme.ru/tetatetme.crt'),
+  key: fs.readFileSync('/home/a0281868/domains/tetatetme.ru/private.key')
+});
+
+app.get('/', function(req, res){
+  res.sendFile(__dirname + '/index.html');
+});
+
+const wss = new WebSocket.Server({ server });
+
+/*
+wss.on('connection', function open(ws) {
+    console.log('Законектился один пользователь');
+    ws.on('message', function incoming(message) {
+        console.log('received: %s', message);
+    });
+ 
+    ws.send('Это пришло SDP с сервера');
+  
+    ws.on('close', function close() {
+        console.log('Пользователь отключился');
+    })
+});*/
+
+
+
+server.listen(3000, function(){
+  console.log('listening on *:3000');
+});
+
+// Переменные и массивы для работы с ними ниже
+var offerSdp = [];
+var offerId = [];
+var answerSdp = [];
+var answerId = [];
+
+
+
+
+//КОД АЛИКА
+wss.on('connection', function(ws){
+	console.log("websocket connected!")
+	ws.on('message', function(data){
+		var msg = JSON.parse(data);
+		
+		// Проверяем есть ли в массиве сервера - Оферы
+		if(msg.message_type === 'do_we_have_offer_on_server') {
+		    
+		    //Если есть - отправляем "Есть" + SDP, ID этого офера (ПОКА ТОЛЬКО ОДНОГО)
+		    if(offerId.length>0) {
+		        ws.send(JSON.stringify({message_type:'Offers online', offerSdp: offerSdp[0], offerId: offerId[0]}));
+		    } //Если нет - отправляем "Нет", чтобы стать офером на клиенте
+		    else {
+		        ws.send(JSON.stringify({message_type:'No offer'}));
+		    }
+		    
+		};
+		
+		
+		// Если получили сообщение о том, что присоединился новый ОФЕР - добавили его в массив
+		if(msg.message_type === 'I am offer') {
+		    offerId.push(msg.user_id);
+		    offerSdp.push(msg.sdp);
+		    //ws.send(JSON.stringify({message_type:'No offer'}));
+		}
+		
+		// Получили сообщение - что ANSWER дал ответ и добавили его SDP в массив
+		if(msg.message_type === 'I am answer') {
+		    answerId.push(msg.answerId);
+		    answerSdp.push(msg.answerSdp);
+		    //console.log("ANSWER SDP ПРИЛЕТЕЛ" + msg.answerSdp.sdp);
+		    ws.send(JSON.stringify({
+		        message_type:'Answer for offer',
+		        answerId: msg.answerId,
+		        answerSdp: msg.answerSdp,
+		        offerId: msg.offerId
+		    }));
+		    
+		}
+		   
+		   // Если получает КАНДИДАТЫ - отправляем весь сокет всем 
+		  if(msg.message_type=="candidate-answer") {
+		        console.log('ПОЛУЧИЛИ КАНДИДАТА АНСВЕРА  ' + data.candidate);
+		        ws.send(data);
+		  }
+		  
+		  if(msg.message_type=="candidate-offer") {
+		      console.log('ПОЛУЧИЛИ КАНДИДАТА ОФРЕА  ' + data.candidate);
+		        ws.send(data);
+		        
+		         
+		  }
+		  
+		  console.log('msg.message_type  ' + msg.message_type);
+		
+	
+	
+	//	console.log("on message!" + data);
+	//	wss.clients.forEach(function(client){
+	//	if(client !==ws && client.readyState===WebSocket.OPEN)client.send(data)	
+	//	})
+		//ws.send(data);
+
+	})	
+	ws.on('close', function(){console.log("Websocket disconnected!")})
+	ws.on('error', function(error){console.log("Websocket error\n", error);})
+})
+
+    
+
+
+/*const fs = require('fs');
 var app = require('express')();
-var http = require('http').Server(app);
-var io = require('socket.io')(http);
+var https = require('https').Server(app);
 
+//var options = {
+//  key: fs.readFileSync('./private.key'),
+//  cert: fs.readFileSync('./file.crt')
+//};
 
-http.listen(3000, function(){
+var server = https.createServer(app);
+var io = require('socket.io')(https);
+//var io = require('socket.io').listen(server);
+
+server.listen(3000, function(){
   console.log('listening on *:3000');
 });
 
@@ -89,5 +216,5 @@ io.on("connection", function(socket) {
 		});
 
 });
-
+*/
 
