@@ -1,204 +1,255 @@
-<!-- https://github.com/webrtc/samples/blob/gh-pages/src/content/peerconnection/audio/js/main.js 
-
-1. Звонящий захватывает локальные медиа через navigator.mediaDevices.getUserMedia() 
-2. Вызывающий объект создает RTCPeerConnection 
-3. и  вызывает  RTCPeerConnection.addTrack()(Так как addStreamявляется устаревшим)
-4. Звонящий звонит, RTCPeerConnection.createOffer()чтобы создать предложение.
-5. Вызывающий абонент вызывает RTCPeerConnection.setLocalDescription()это предложение как локальное описание (то есть описание локального конца соединения).
-6. После setLocalDescription () вызывающая сторона просит серверы STUN сгенерировать iCE кандидатов
-
-(Помимо обмена информацией о мультимедиа (предложениях / ответах и ​​SDP), одноранговые узлы должны обмениваться информацией о сетевом подключении через ICE кандидаты)
-
-7. Вызывающий абонент использует сервер сигнализации для передачи предложения предполагаемому получателю вызова.
-8. Получатель получает предложение и звонит, RTCPeerConnection.setRemoteDescription()чтобы записать его как удаленное описание (описание другого конца соединения).
-9. Получатель выполняет любую настройку, необходимую ему для завершения вызова: захватывает локальные носители и присоединяет каждую дорожку мультимедиа к одноранговому соединению через RTCPeerConnection.addTrack()
-10. Получатель затем создает ответ по телефону RTCPeerConnection.createAnswer().
-11. Получатель звонит, RTCPeerConnection.setLocalDescription(createdAnswer)чтобы установить ответ в качестве локального описания. Получатель теперь знает конфигурацию обоих концов соединения.
-12. Получатель использует сервер сигнализации для отправки ответа вызывающей стороне.
-13. Звонящий получает ответ.
-14. Вызывающий абонент RTCPeerConnection.setRemoteDescription()устанавливает ответ в качестве удаленного описания для окончания вызова. Теперь он знает конфигурацию обоих пиров. Медиа начинает течь как настроено.
-
-
-
-
--->
 <html>
 <head>
-	<meta charset="utf-8">
-	<title>Audio</title>
+    <meta charset="utf-8">
+    <title>webrtc offer</title>
+<style>#out{border: 1px solid green;}</style>
 </head>
 <body>
-	<h3>audio</h3>
-	<div>local audio:</div>
-	<audio id="audio1" autoplay controls muted></audio>
-	<div>remote audio:</div>
-	<audio id="audio2" autoplay controls></audio>
-	<button id="callbutton">call</button>
-	<button id="hangupbutton">hang up</button>
+    <div id="offer">
+        <a href="/answer.html" target="_blank">go to answer.html</a><hr>
+        <h1>Offer</h1>
+        <h3>Звони первым, отправь предложение. </h3>
+        <h4>Убедись, что вебсокет открыт.</h4>
+        <button onclick="start();">Позвонить</button><hr>
+        <audio id="audioOffer" autoplay controls></audio><hr>
+        <output id="out1"></output>
+    </div>
+    <div id="answer">
+        <a href="/offer.html" target="_blank">go to offer.html</a><hr>
+        <h1>Answer</h1>
+        <h3>отправь ответ. </h3>
+        <h4>Убедись, что вебсокет открыт.</h4>
+        <!-- <button onclick="start();">Позвонить</button> --><hr><audio id="audio2" autoplay controls></audio><hr>
+        <output id="out2"></output>
+    </div>
+    
+    <script>
+        document.getElementById('answer').style.display = 'none';
+        document.getElementById('offer').style.display = 'none';
+        
+        var userid = generateId();
+        var whoAmI = '';
+        
+        var servers = {
+                                            iceServerUrl: [
+                                                    {url: "stun:stun.ekiga.net"}
+                                            ]
+                                    };
+        pc=new RTCPeerConnection(servers);
+        
+        var ws=new WebSocket("wss://tetatetme.ru:3000");
+    	ws.onopen=function(){console.log("Websocket opened!<br>");}
+    	ws.onclose=function(){console.log("Websocket closed!<br>");}
+    	ws.onerror=function(error){console.log("Websocket error "+error+"<br>");}
+    	ws.onmessage=function(event){
+    	    console.log('1. Зашли в onmesage');
+    	    
+    	    var msgFromServer;
+		    
+		    try {
+		        msgFromServer = JSON.parse(event.data);
+		        
+		    } catch (e) {
+		        return;
+		        
+		    };
+		    
+		    if (msgFromServer.message_type === 'No offer') {
+		        console.log('Офера пока нет на сервере');
+		        document.getElementById('offer').style.display = 'block';
+		    };
+		    
+		    if (msgFromServer.message_type === 'Offers online') {
+		        console.log('Оферы онлайн', msgFromServer.offerSdp, ' ', msgFromServer.offerId);
+		        document.getElementById('answer').style.display = 'block';
+		        setAnswerSettingsFromAnotherOffer(msgFromServer);
+		    };
+		    
+		    if (msgFromServer.message_type === 'Answer for offer') {
+		        console.log("Answer for offer");
+		       if (msgFromServer.offerId == userid) {
+                    console.log("Answer for offer 2");
+                	if(!msgFromServer.answerSdp) console.warn("What the fuck? No sdp?");
+                	pc.setRemoteDescription(msgFromServer.answerSdp).then(function(){
+                	console.log("есть конект АНСВЕР - ОФЕР");
+                	},on_error);
+		       }
+		    };
+		    
+		    if(msgFromServer.message_type=="candidate-answer") {
+    			console.warn("candidate in socket");
+    		} else {
+    			console.warn("Unknown type: ", msgFromServer.message_type);	
+    		};
+    		
+    		if(msgFromServer.message_type=="candidate-offer" && whoAmI != 'offer') {
+    		    console.warn("candidate in socket");
+
+        		if(pc)pc.addIceCandidate(msgFromServer.candidate).then(function(){console.log("added candidate success")},
+        		function(err){console.log("failed adding candidate: ",err);})
+        		} else {console.warn("Unknown type");};
+        		
+        	
+        	console.log(msgFromServer);
+    		
+    	};
+    	
+    	var wsSend = function(data) {
+    	    if(!ws.readyState) {
+    	        setTimeout(function () {
+    	            wsSend(data);
+    	        }, 100);
+    	    } else {
+    	        ws.send(data)
+    	    }
+    	}
+    	
+    	function generateId() {
+    	    var now = Date.now();
+    	    console.log(now);
+    	    return now;
+    	}
+    	
+    	
+    	
+    	wsSend(JSON.stringify({
+            message_type:'do_we_have_offer_on_server',
+    	    user_id: userid
+    	}));
+    	
+    	
+    	// RTCPeer - GO!!!!
+    	var pc=null;
+    	var localStream;
+    	//var audio2=document.getElementById("audio2");
+    	var offeroptions={offerToReceiveAudio:1, offerToReceiveVideo:0, voiceActivityDetection:false};
+	
+    	function start(){
+        	//const servers=null; // STUN сервера должны быть по идее
+        	whoAmI = 'offer';
+        	
+        	var servers = {
+                                            iceServerUrl: [
+                                                    {url: "stun:stun.ekiga.net"}
+                                            ]
+                                    };
+        	pc=new RTCPeerConnection(servers);
+        
+        	pc.onicecandidate = function(e) {     	// SEND CANDIDATE FROM OFFER
+        		if(e.candidate){
+        			console.log("CANDIDATE-send-form-offer:\n", e.candidate);
+        			//if(ws)
+        			ws.send(JSON.stringify({
+        			    
+        			    message_type:"candidate-offer",
+        			    candidate:e.candidate
+        			    
+        			}));
+        		}
+        	}
+        
+        	navigator.mediaDevices.getUserMedia({audio:true,video:false}).then(gotStream).catch(function(e){console.log(e.name, e)})
+        }
+
+        function gotStream(stream){
+        	console.log("received local stream");
+        	localStream=stream;
+        	const audioTracks=localStream.getAudioTracks();
+        
+        	if(audioTracks.length>0){
+        		console.warn(audioTracks[0].label);	
+        	}
+        
+        	localStream.getTracks().forEach(function(track){pc.addTrack(track, localStream)});
+        	console.log("adding local stream to pc");
+        	pc.createOffer(offeroptions).then(gotdesc, on_error);	
+        }
+        
+        function gotdesc(obj){
+        //console.log("offer sdp\n",obj.sdp)
+        	pc.setLocalDescription(obj).then(function(){
+        		console.log("send offer to answer.html");	
+        		if(ws)ws.send(JSON.stringify({
+        		    
+        		    message_type: 'I am offer',
+        		    user_id: userid,
+        		    type:"offer",
+        		    sdp: pc.localDescription
+        		    
+        		}))       // SEND SDP FROM OFFER
+        	}, on_error)
+        }
+        
+        function on_error(err){console.error(err);}
+            	
         
         
         
-<script src="/socket.io/socket.io.js"></script>
-<script src="https://code.jquery.com/jquery-1.11.1.js"></script>
-
-
-
-
-	<script>
-            var socket = io();
-          /*  $(function () {
-                
-                $('form').submit(function(e){
-                  e.preventDefault(); // prevents page reloading
-                  socket.emit('chat message', $('#m').val());
-
-                  //var user = '#gender', '#m'];
-
-                  var user_gender = $('#gender').val();
-                  var user_age = $('#age').val();
-
-                  var user = [user_gender, user_age];
-
-                  socket.emit('chat member gender', user);
-
-                  $('#m').val('');
-                  return false;
-                });
-                socket.on('chat message', function(msg){
-                  $('#messages').append($('<li>').text(msg));
-                });
-              });*/
-  
-  
-		const audio2=document.querySelector("#audio2");
-		const callbutton=document.querySelector("#callbutton");
-		const hangupbutton=document.querySelector("#hangupbutton");
-		hangupbutton.disabled=true;
-		callbutton.onclick=call;
-		hangupbutton.onclick=hang;
-		let pc1,pc2,localStream;
-		const offeroptions={offerToReceiveAudio:1,offerToReceiveVideo:0,voiceActivityDetection:false};
-
-		function call(){
-			callbutton.disabled=true;
-			console.log('starting call');
-			//const servers=null;
-                        
-                        
-                        
-                        var servers = {
-                                    iceServerUrl: [
-                                            {url: "stun:stun.ekiga.net"}
-                                    ]
-                            };
-                            
-
-                        
-			pc1=new RTCPeerConnection(servers);	// 2. Звонящий создает объект RTCPeerConnection
-			pc1.onicecandidate=e=>onicecandidate(pc1,e) // 6. После setLocalDescription () вызывающая сторона просит серверы STUN сгенерировать ice кандидатов.
-			// 7 КОТОРОГО НЕТ - Вызывающий абонент использует сервер сигнализации для передачи предложения предполагаемому получателю вызова.
-			pc2=new RTCPeerConnection(servers);
-			pc2.onicacandidate=e=>onicecandidate(pc2,e)
-			pc2.ontrack=gotremotestream;
-			navigator.mediaDevices.getUserMedia({audio:true,video:false}).then(gotStream).catch(e=>{console.log(e.name, e)})	// 1. Звонящий захватывает локальные медиа через navigator.mediaDevices.getUserMedia() 
-		}
-		
-		function gotStream(stream){
-			hangupbutton.disabled=false;
-			console.log("received local stream");
-			localStream=stream;
-			const audioTracks=localStream.getAudioTracks();
-		
-			if(audioTracks.length>0){
-				console.warn(audioTracks[0].label);	
-			}
-
-			localStream.getTracks().forEach(track=>pc1.addTrack(track,localStream)); // 3. и  вызывает  RTCPeerConnection.addTrack() (Так как addStream является устаревшим)
-			console.log("adding local stream to pc");
-			pc1.createOffer(offeroptions).then(gotdesc1,oncreatesessiondescriptionerror); // 4. Звонящий звонит, RTCPeerConnection.createOffer()чтобы создать предложение.
-                        
-		}
-		
-		function oncreatesessiondescriptionerror(e){console.error(e.toString())}
-		
-		function gotdesc1(desc){
-			console.log("offer from pc1\n",desc.sdp)
-                        sendToServer(desc.sdp);
-			pc1.setLocalDescription(desc).then(()=>{ // 5. Вызывающий абонент вызывает RTCPeerConnection.setLocalDescription()это предложение как локальное описание (то есть описание локального конца соединения).
-			pc2.setRemoteDescription(desc).then(()=>{ // 8. Получатель получает предложение и звонит, RTCPeerConnection.setRemoteDescription()чтобы записать его как удаленное описание (описание другого конца соединения).
-
-				// 9. НЕТУ !!!! Получатель выполняет любую настройку, необходимую ему для завершения вызова: захватывает локальные носители и присоединяет каждую дорожку мультимедиа к одноранговому соединению через RTCPeerConnection.addTrack()
-
-			return pc2.createAnswer().then(gotdesc2,oncreatesessiondescriptionerror)	// 10. Получатель затем создает ответ по телефону RTCPeerConnection.createAnswer().
-			},oncreatesessiondescriptionerror)
-			},oncreatesessiondescriptionerror)	
-		} 
-                
-                function sendToServer(msg) {
-                    var msgJSON = JSON.stringify(msg);
-                    
-                    socket.emit('chat message', msgJSON);
-                    
-                    //console.log("----- sendToServer START----- " + msgJSON);
-                   // console.log("----- sendToServer END----- " + msgJSON);
-                   // connection.send(msgJSON);
-                  }
-
-
-		function gotremotestream(e){
-			if(audio2.srcObject !==e.streams[0]){
-			audio2.srcObject=e.streams[0];
-			console.log("receive remote stream");	
-			}	
-		}
-
-		function gotdesc2(desc){
-                    console.log("answer from pc2\n",desc.sdp)
-                    pc2.setLocalDescription(desc).then(()=>{ // 11. Получатель звонит, RTCPeerConnection.setLocalDescription(createdAnswer) чтобы установить ответ в качестве локального описания. Получатель теперь знает конфигурацию обоих концов соединения.
-
-                            // 12. НЕТУ - Получатель использует сервер сигнализации для отправки ответа вызывающей стороне.
-
-                            // 13. НЕТУ - Звонящий получает ответ.
-
-                        pc1.setRemoteDescription(desc).then(()=>{ // 14. Вызывающий абонент RTCPeerConnection.setRemoteDescription()устанавливает ответ в качестве удаленного описания для окончания вызова. Теперь он знает конфигурацию обоих пиров. Медиа начинает течь как настроено.
-
-                            },oncreatesessiondescriptionerror)	
-                        },oncreatesessiondescriptionerror)	
-		}
-		
-		function onicecandidate(pc,event){
-			if(event.candidate)geti(pc).addIceCandidate(event.candidate).then(()=>onicecandidatesuccess(pc),err=>onicecandidateerror(err))
-			if(event.candidate){console.warn(event.candidate.candidate);}else{console.warn(null)}	
-		}
-
-		function geti(pc){
-			return (pc===pc1) ? pc2:pc1;	
-		}
-
-		function onicecandidatesuccess(){console.log("ice candidate success")}
-		
-		function onicecandidateerror(e){console.error(e.toString())}
-
-		function hang(){
-			console.log("ending call");
-			localStream.getTracks().forEach(track=>track.stop())
-			pc1.close();
-			pc2.close();
-			pc1=null;pc2=null;
-			hangupbutton.disabled=true;
-			callbutton.disabled=false;	
-		}
-
-		//function getname(){
-		//	return (pc===pc1) ? 'pc1':'pc2';	
-		//}
-
-	</script>
+        // Устанавливаем SDP на Ансвера от Офера с другого компьютера
+        function setAnswerSettingsFromAnotherOffer(dataFromOffer) {
+            whoAmI = 'answer';
+            
+            var servers = {
+	                                    iceServerUrl: [
+	                                            {url: "stun:stun.ekiga.net"}
+	                                    ]
+	                            };
+	                            
+		    pc=new RTCPeerConnection(servers);
+		    
+		    pc.onicecandidate=function(e){
+    			if(e.candidate){
+    				console.log("CANDIDATE:\n", e.candidate);
+    				if(ws)ws.send(JSON.stringify({
+    				    
+    				    message_type:"candidate-answer",
+    				    candidate:e.candidate
+    				    
+    				}));	// SEND CANDIDATE FROM ANSWER TO OFFER
+    			}
+    		}
+    
+    		pc.ontrack=got_remote_stream;
+    
+    		async function boo(){
+    			// Приняли и установили ОФЕР
+    			await pc.setRemoteDescription(dataFromOffer.offerSdp);
+    			
+    			// Создали свой АНСВЕР и установили его себе
+    			let desc=await pc.createAnswer();
+    			await pc.setLocalDescription(desc);	
+    			
+    			// Сгенерировали свой ID
+    			var answerId = generateId();
+    			
+    			// Заджейсонили свой АНСВЕР
+    			;      // Не хватает type: 'answer'
+    			
+    			if(ws)setTimeout(function(){ws.send(JSON.stringify({    // SEND SDP FROM ANSWER TO OFFER
+    			        
+    			        message_type: "I am answer",
+    			        answerId: answerId,
+    			        answerSdp: pc.localDescription, 
+    			        offerId: dataFromOffer.offerId
+    			    
+    			}));},1000); 
+    		}
+    		
+    		boo().then(function(){})
+    	}
+    	
+    	
+    	function got_remote_stream(e){
+    		console.warn("got_remote_stream");	
+    		if(audio2.srcObject !==e.streams[0]){
+    			audio2.srcObject=e.streams[0];
+    			console.log("receive remote stream");	
+    		}	
+        }
         
         
-        
-        <script src="/socket.io/socket.io.js"></script>
-<script src="https://code.jquery.com/jquery-1.11.1.js"></script>
-
+            	//wsSend('1');
+    </script>
 </body>
 </html>
+    
