@@ -5,11 +5,21 @@
 <style>#out{border: 1px solid green;}</style>
 </head>
 <body>
+	
+	<h3>Впиши в форму свой ник</h3>
+	<form name="nick">
+	<input type="text" name="yourNick" value="Bob"  placeholder="your nick">
+	<input type="submit" value="Set your nick">
+	</form>
+	<div>
+	<h4> Joined Users:</h4>
+	<div id="allUsers"></div>
+    </div>
+    <button onclick="test_target();">test target to me from me</button>
+	<!-- <div id="chatbox"></div> -->
+	
     <div id="offer">
-        <a href="/answer.html" target="_blank">go to answer.html</a><hr>
-        <h1>Offer</h1>
-        <h3>Звони первым, отправь предложение. </h3>
-        <h4>Убедись, что вебсокет открыт.</h4>
+       
         <button onclick="start();">Позвонить</button><hr>
         <audio id="audioOffer" autoplay controls></audio><hr>
         <output id="out1"></output>
@@ -26,21 +36,38 @@
     <script>
         document.getElementById('answer').style.display = 'none';
         document.getElementById('offer').style.display = 'none';
+        var ws_uri;
+        var ws;
+        var userid = generateId();//??
+        var whoAmI;// your nick??
         
         var userid = generateId();
-        var whoAmI = '';
+        var whoAmI;
         
-        var servers = {
-                                            iceServerUrl: [
-                                                    {url: "stun:stun.ekiga.net"}
-                                            ]
-                                    };
-        pc=new RTCPeerConnection(servers);
+        var servers = { iceServerUrl: [{url: "stun:stun.ekiga.net"}]};
+                                    
+document.forms.nick.onsubmit=function(){
+let d={};
+if(this.yourNick.value){
+let d={};
+d.nick=this.yourNick.value;
+d.message_type="nick";
+psend(d);
+}else{alert("What the nick you have?");}
+return false;//prevents default event in form element		
+}
+        pc=new RTCPeerConnection(/*servers*/null);// i'm on localhost that's why null
+        if(window.location.protocol=="https:"){
+		ws_uri="wss:";	
+		}else{
+		ws_uri="ws:";	
+		}
+        ws=new WebSocket(ws_uri+"//"+window.location.hostname+":"+window.location.port);
         
-        var ws=new WebSocket("wss://tetatetme.ru:3000");
+       // ws=new WebSocket("wss://tetatetme.ru:3000");
     	ws.onopen=function(){console.log("Websocket opened!<br>");}
     	ws.onclose=function(){console.log("Websocket closed!<br>");}
-    	ws.onerror=function(error){console.log("Websocket error "+error+"<br>");}
+    	ws.onerror=function(error){console.error("Websocket error "+error+"<br>");}
     	ws.onmessage=function(event){
     	    console.log('1. Зашли в onmesage');
     	    
@@ -50,9 +77,21 @@
 		        msgFromServer = JSON.parse(event.data);
 		        
 		    } catch (e) {
+				console.error(e);
 		        return;
 		        
 		    };
+		    
+		    if(msgFromServer.message_type==="nick"){
+				whoAmI=msgFromServer.nick;
+				console.log("Your nick is ", whoAmI);
+			}else if(msgFromServer.message_type==="join"){
+				console.log("join");
+				let nicky=msgFromServer.nick;
+				allUsers.innerHTML+="<div data-nick="+nicky+" onclick=\"call_me(this);\">"+nicky+"</div>"
+			}else if(msgFromServer.message_type==="target"){
+			console.log("Target\n", event.data);	
+			}
 		    
 		    if (msgFromServer.message_type === 'No offer') {
 		        console.log('Офера пока нет на сервере');
@@ -79,7 +118,7 @@
 		    if(msgFromServer.message_type=="candidate-answer") {
     			console.warn("candidate in socket");
     		} else {
-    			console.warn("Unknown type: ", msgFromServer.message_type);	
+    			//console.warn("Unknown type: ", msgFromServer.message_type);	
     		};
     		
     		if(msgFromServer.message_type=="candidate-offer" && whoAmI != 'offer') {
@@ -87,7 +126,9 @@
 
         		if(pc)pc.addIceCandidate(msgFromServer.candidate).then(function(){console.log("added candidate success")},
         		function(err){console.log("failed adding candidate: ",err);})
-        		} else {console.warn("Unknown type");};
+        		} else {
+					//console.warn("Unknown type");
+					};
         		
         	
         	console.log(msgFromServer);
@@ -110,6 +151,37 @@
     	    return now;
     	}
     	
+    	function psend(obj){
+if(ws){
+let a;
+try{
+a=JSON.stringify(obj);
+ws.send(a);
+}catch(e){console.error(e);}	
+}
+	
+}
+function call_me(el){
+let b=el.getAttribute("data-nick");
+if(!b)return;
+if(!whoAmI)return;
+let d={}
+d.to=b;
+d.from=whoAmI;
+d.sdp="fakeSdp";
+d.message_type="target";
+psend(d);
+}
+function test_target(){
+if(!whoAmI){alert("who are you?");return;}
+let d={};
+d.to=whoAmI;
+d.from=whoAmI;
+d.message_type="target";
+d.msg="Hi there!";
+d.sdp="takeSDP";
+psend(d);	
+}
     	
     	
     	wsSend(JSON.stringify({
