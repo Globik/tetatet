@@ -1,14 +1,29 @@
-var express=require('express');
-var app = express();
+const MY_PORT=8000;
+const MY_HOSTNAME="my_app_local.ru";
+
+//const cert='/home/a0281868/domains/tetatetme.ru/tetatetme.crt';
+//const key='/home/a0281868/domains/tetatetme.ru/private.key';
+const key="/home/globik/kore.io_websocket/janus/cert/key.pem";
+const cert="/home/globik/kore.io_websocket/janus/cert/server.pem";
+
+const express=require('express');
+
 
 const fs = require('fs');
 const https = require('https');
 const WebSocket = require('ws');
+const app = express();
+
+const ssl_ops={
+cert: fs.readFileSync(cert), 
+key: fs.readFileSync(key)
+}
  
-const server = new https.createServer({
-  cert: fs.readFileSync('/home/a0281868/domains/tetatetme.ru/tetatetme.crt'),
-  key: fs.readFileSync('/home/a0281868/domains/tetatetme.ru/private.key')
+const server = https.createServer(ssl_ops, app).listen(MY_PORT,MY_HOSTNAME,function(){
+console.log("Listen : https://",MY_HOSTNAME,":", MY_PORT);	
 });
+
+
 
 app.get('/', function(req, res){
   res.sendFile(__dirname + '/index.html');
@@ -16,40 +31,80 @@ app.get('/', function(req, res){
 
 const wss = new WebSocket.Server({ server });
 
-/*
-wss.on('connection', function open(ws) {
-    console.log('Законектился один пользователь');
-    ws.on('message', function incoming(message) {
-        console.log('received: %s', message);
-    });
- 
-    ws.send('Это пришло SDP с сервера');
-  
-    ws.on('close', function close() {
-        console.log('Пользователь отключился');
-    })
-});*/
 
-
-
-server.listen(3000, function(){
-  console.log('listening on *:3000');
-});
-
-// Переменные и массивы для работы с ними ниже
+// Переменные и массивы для работы с ними ниже ?? for what?
 var offerSdp = [];
 var offerId = [];
 var answerSdp = [];
 var answerId = [];
 
 
+function broadcast_to_all_not_me(ws, data){
+wss.clients.forEach(function(client){
+if(client !==ws && client.readyState===WebSocket.OPEN)client.send(data)	
+})
+}
+function broadcast_to_all(data){
+wss.clients.forEach(function(client){
+if(client.readyState===WebSocket.OPEN)client.send(data)	
+})
+}
+
+function send_target( data,target){
+
+console.log("size: ", wss.clients.size);
+for(let i of wss.clients){
+if(i.nick==target){
+console.log(i.nick,"=",target);
+if(i.readyState===WebSocket.OPEN)i.send(data)	
+break;
+}
+}
+}
 
 
-//КОД АЛИКА
-wss.on('connection', function(ws){
-	console.log("websocket connected!")
-	ws.on('message', function(data){
-		var msg = JSON.parse(data);
+
+//КОД АЛИКА <= who is it?
+wss.on('connection', ws_onconnect);
+function ws_onconnect(ws,url){
+console.log("websocket connected!");
+	
+ws.on('message', on_message);
+ws.on('close', function(){console.log("Websocket disconnected!")})
+ws.on('error', function(error){console.log("Websocket error\n", error);})
+
+function on_message(data){
+
+console.log("data came: ", data);
+var send_to_clients=0;
+try{
+var msg = JSON.parse(data);//must be Json format, not binary, not a simple text
+
+}catch(e){console.log(e);return;}
+
+if(msg.message_type=="msg"){
+console.log("message here: ", msg);
+}else if(msg.message_type=="nick"){
+console.log("set a nick");
+ws.nick=msg.nick;
+ws.send(data);
+msg.message_type="join";//a new user joined , inform all
+let rjs=JSON.stringify(msg);
+console.log(rjs);
+broadcast_to_all(rjs);
+send_to_clients=1;
+}else if(msg.message_type=="target"){
+send_target(data, msg.to);
+send_to_clients=1;
+}else{console.log("unknown type=>", msg.message_type); return;}
+		
+if(send_to_clients==0)ws.send(data);
+
+	
+	
+
+
+    
 		
 		// Проверяем есть ли в массиве сервера - Оферы
 		if(msg.message_type === 'do_we_have_offer_on_server') {
@@ -99,20 +154,11 @@ wss.on('connection', function(ws){
 		         
 		  }
 		  
-		  console.log('msg.message_type  ' + msg.message_type);
-		
-	
-	
-	//	console.log("on message!" + data);
-	//	wss.clients.forEach(function(client){
-	//	if(client !==ws && client.readyState===WebSocket.OPEN)client.send(data)	
-	//	})
-		//ws.send(data);
+		//  console.log('msg.message_type  ' + msg.message_type);
 
-	})	
-	ws.on('close', function(){console.log("Websocket disconnected!")})
-	ws.on('error', function(error){console.log("Websocket error\n", error);})
-})
+	}	
+
+}
 
     
 
